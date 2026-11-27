@@ -5,12 +5,17 @@ import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
+import android.graphics.Color
 import android.graphics.drawable.Icon
 import android.graphics.drawable.LayerDrawable
 import android.os.Bundle
 import android.provider.Telephony
+import android.text.SpannableString
+import android.text.Spanned
 import android.text.TextUtils
+import android.text.style.ForegroundColorSpan
 import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.graphics.ColorUtils
 import org.fossify.commons.dialogs.PermissionRequiredDialog
 import org.fossify.commons.extensions.adjustAlpha
 import org.fossify.commons.extensions.appLaunched
@@ -26,6 +31,7 @@ import org.fossify.commons.extensions.checkWhatsNew
 import org.fossify.commons.extensions.convertToBitmap
 import org.fossify.commons.extensions.fadeIn
 import org.fossify.commons.extensions.formatDateOrTime
+import org.fossify.commons.extensions.getContrastColor
 import org.fossify.commons.extensions.getMyContactsCursor
 import org.fossify.commons.extensions.getProperBackgroundColor
 import org.fossify.commons.extensions.getProperPrimaryColor
@@ -156,7 +162,10 @@ class MainActivity : SimpleActivity() {
     }
 
     private fun setupOptionsMenu() {
-        binding.mainMenu.requireToolbar().inflateMenu(R.menu.menu_main)
+        binding.mainMenu.requireToolbar().apply {
+            popupTheme = R.style.MainMenuPopupTheme
+            inflateMenu(R.menu.menu_main)
+        }
         binding.mainMenu.toggleHideOnScroll(true)
         binding.mainMenu.setupMenu()
 
@@ -212,6 +221,16 @@ class MainActivity : SimpleActivity() {
 
     private fun updateMenuColors() {
         binding.mainMenu.updateColors()
+        val surfaceColor = ColorUtils.blendARGB(getProperBackgroundColor(), Color.BLACK, 0.05f)
+        binding.mainMenu.binding.toolbarContainer.background?.applyColorFilter(surfaceColor)
+        val menu = binding.mainMenu.requireToolbar().menu
+        val textColor = surfaceColor.getContrastColor()
+        for (index in 0 until menu.size()) {
+            val item = menu.getItem(index)
+            item.title = SpannableString(item.title.toString()).apply {
+                setSpan(ForegroundColorSpan(textColor), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
     }
 
     private fun loadMessages() {

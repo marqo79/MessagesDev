@@ -1,8 +1,8 @@
 package org.fossify.messages.adapters
 
-import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.util.TypedValue
@@ -13,6 +13,7 @@ import android.widget.LinearLayout
 import android.widget.RelativeLayout
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.constraintlayout.widget.ConstraintSet
+import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.updateLayoutParams
 import androidx.recyclerview.widget.DiffUtil
@@ -30,12 +31,14 @@ import com.bumptech.glide.request.target.Target
 import org.fossify.commons.adapters.MyRecyclerViewListAdapter
 import org.fossify.commons.dialogs.ConfirmationDialog
 import org.fossify.commons.extensions.applyColorFilter
+import org.fossify.commons.extensions.adjustForContrast
 import org.fossify.commons.extensions.beGone
 import org.fossify.commons.extensions.beVisible
 import org.fossify.commons.extensions.beVisibleIf
 import org.fossify.commons.extensions.copyToClipboard
 import org.fossify.commons.extensions.formatDateOrTime
 import org.fossify.commons.extensions.getContrastColor
+import org.fossify.commons.extensions.getProperBackgroundColor
 import org.fossify.commons.extensions.getProperPrimaryColor
 import org.fossify.commons.extensions.getTextSize
 import org.fossify.commons.extensions.getTimeFormat
@@ -43,7 +46,6 @@ import org.fossify.commons.extensions.shareTextIntent
 import org.fossify.commons.extensions.showErrorToast
 import org.fossify.commons.extensions.usableScreenSize
 import org.fossify.commons.helpers.FontHelper
-import org.fossify.commons.helpers.SimpleContactsHelper
 import org.fossify.commons.helpers.ensureBackgroundThread
 import org.fossify.commons.views.MyRecyclerView
 import org.fossify.messages.R
@@ -71,7 +73,6 @@ import org.fossify.messages.extensions.isVCardMimeType
 import org.fossify.messages.extensions.isVideoMimeType
 import org.fossify.messages.extensions.launchViewIntent
 import org.fossify.messages.extensions.startContactDetailsIntent
-import org.fossify.messages.extensions.subscriptionManagerCompat
 import org.fossify.messages.helpers.EXTRA_VCARD_URI
 import org.fossify.messages.helpers.THREAD_DATE_TIME
 import org.fossify.messages.helpers.THREAD_RECEIVED_MESSAGE
@@ -101,8 +102,6 @@ class ThreadAdapter(
 ) : MyRecyclerViewListAdapter<ThreadItem>(activity, recyclerView, ThreadItemDiffCallback(), itemClick) {
     private var fontSize = activity.getTextSize()
 
-    @SuppressLint("MissingPermission")
-    private val hasMultipleSIMCards = (activity.subscriptionManagerCompat().activeSubscriptionInfoList?.size ?: 0) > 1
     private val maxChatBubbleWidth = (activity.usableScreenSize.x * 0.8f).toInt()
 
     companion object {
@@ -204,7 +203,7 @@ class ThreadAdapter(
         return when (val item = getItem(position)) {
             is Message -> item.getStableId()
             is ThreadDateTime -> {
-                val sim = (item.simID.hashCode().toLong() and SIM_MASK)
+                val sim = item.subscriptionId.toLong() and SIM_MASK
                 val key = (item.date.toLong() shl SIM_BITS) or sim
                 generateStableId(THREAD_DATE_TIME, key)
             }
@@ -420,38 +419,33 @@ class ThreadAdapter(
                 applyTo(threadMessageHolder)
             }
 
-            threadMessageSenderPhoto.beVisible()
-            threadMessageSenderPhoto.setOnClickListener {
-                val contact = message.getSender()!!
-                activity.getContactFromAddress(contact.phoneNumbers.first().normalizedNumber) {
-                    if (it != null) {
-                        activity.startContactDetailsIntent(it)
+            threadMessageSenderName.apply {
+                text = message.senderName
+                setTextColor(textColor)
+                beVisibleIf(message.participants.size > 1 && message.senderName.isNotBlank())
+                setOnClickListener {
+                    val number = message.getSender()?.phoneNumbers?.firstOrNull()?.normalizedNumber
+                    if (number != null) {
+                        activity.getContactFromAddress(number) { contact ->
+                            if (contact != null) activity.startContactDetailsIntent(contact)
+                        }
                     }
                 }
             }
 
             threadMessageBody.apply {
-                background = AppCompatResources.getDrawable(activity, R.drawable.item_received_background)
+                val pageColor = activity.getProperBackgroundColor()
+                val light = ColorUtils.calculateLuminance(pageColor) > 0.5
+                val bubbleColor = if (light) Color.WHITE else Color.rgb(48, 52, 56)
+                val outline = ColorUtils.blendARGB(pageColor, pageColor.getContrastColor(), 0.16f)
+                background = (AppCompatResources.getDrawable(activity, R.drawable.item_received_background)?.mutate() as GradientDrawable).apply {
+                    setColor(bubbleColor)
+                    setStroke(resources.displayMetrics.density.toInt().coerceAtLeast(1), outline)
+                }
                 setTextColor(textColor)
                 setLinkTextColor(activity.getProperPrimaryColor())
             }
 
-            if (!activity.isFinishing && !activity.isDestroyed) {
-                val contactLetterIcon = SimpleContactsHelper(activity).getContactLetterIcon(message.senderName)
-                val placeholder = contactLetterIcon.toDrawable(activity.resources)
-
-                val options = RequestOptions()
-                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
-                    .error(placeholder)
-                    .centerCrop()
-
-                Glide.with(activity)
-                    .load(message.senderPhotoUri)
-                    .placeholder(placeholder)
-                    .apply(options)
-                    .apply(RequestOptions.circleCropTransform())
-                    .into(threadMessageSenderPhoto)
-            }
         }
     }
 
@@ -464,8 +458,10 @@ class ThreadAdapter(
                 applyTo(threadMessageHolder)
             }
 
-            val primaryColor = activity.getProperPrimaryColor()
-            val contrastColor = primaryColor.getContrastColor()
+            threadMessageSenderName.beGone()
+            val light = ColorUtils.calculateLuminance(activity.getProperBackgroundColor()) > 0.5
+            val bubbleColor = if (light) Color.rgb(204, 233, 227) else Color.rgb(33, 68, 64)
+            val contrastColor = bubbleColor.getContrastColor()
 
             threadMessageBody.apply {
                 updateLayoutParams<RelativeLayout.LayoutParams> {
@@ -474,7 +470,7 @@ class ThreadAdapter(
                 }
 
                 background = AppCompatResources.getDrawable(activity, R.drawable.item_sent_background)
-                background.applyColorFilter(primaryColor)
+                background.applyColorFilter(bubbleColor)
                 setTextColor(contrastColor)
                 setLinkTextColor(contrastColor)
 
@@ -611,16 +607,15 @@ class ThreadAdapter(
                     hideTimeOnOtherDays = false,
                     showCurrentYear = false
                 )
-                setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSize)
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSize * 0.78f)
             }
             threadDateTime.setTextColor(textColor)
 
-            threadSimIcon.beVisibleIf(hasMultipleSIMCards)
-            threadSimNumber.beVisibleIf(hasMultipleSIMCards)
-            if (hasMultipleSIMCards) {
-                threadSimNumber.text = dateTime.simID
-                threadSimNumber.setTextColor(textColor.getContrastColor())
-                threadSimIcon.applyColorFilter(textColor)
+            val sim = dateTime.sim
+            threadSimName.beVisibleIf(sim != null)
+            if (sim != null) {
+                threadSimName.text = sim.label
+                threadSimName.setTextColor(sim.color.adjustForContrast(activity.getProperBackgroundColor()))
             }
         }
     }
@@ -649,7 +644,6 @@ class ThreadAdapter(
         if (!activity.isDestroyed && !activity.isFinishing) {
             val binding = (holder as ThreadViewHolder).binding
             if (binding is ItemMessageBinding) {
-                Glide.with(activity).clear(binding.threadMessageSenderPhoto)
             }
         }
     }
@@ -668,7 +662,7 @@ private class ThreadItemDiffCallback : DiffUtil.ItemCallback<ThreadItem>() {
             is Message -> Message.areItemsTheSame(oldItem, newItem as Message)
             is ThreadDateTime -> {
                 val new = newItem as ThreadDateTime
-                oldItem.date == new.date && oldItem.simID == new.simID
+                oldItem.date == new.date && oldItem.subscriptionId == new.subscriptionId
             }
         }
     }
@@ -677,7 +671,7 @@ private class ThreadItemDiffCallback : DiffUtil.ItemCallback<ThreadItem>() {
         if (oldItem::class.java != newItem::class.java) return false
         return when (oldItem) {
             is ThreadSending -> true
-            is ThreadDateTime -> oldItem.simID == (newItem as ThreadDateTime).simID
+            is ThreadDateTime -> oldItem.sim == (newItem as ThreadDateTime).sim
             is ThreadError -> oldItem.messageText == (newItem as ThreadError).messageText
             is ThreadSent -> oldItem.delivered == (newItem as ThreadSent).delivered
             is Message -> Message.areContentsTheSame(oldItem, newItem as Message)

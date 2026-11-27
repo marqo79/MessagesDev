@@ -2,7 +2,6 @@ package org.fossify.messages.helpers
 
 import android.content.Context
 import org.fossify.commons.helpers.BaseConfig
-import org.fossify.messages.extensions.getDefaultKeyboardHeight
 import org.fossify.messages.models.Conversation
 
 class Config(context: Context) : BaseConfig(context) {
@@ -110,10 +109,6 @@ class Config(context: Context) : BaseConfig(context) {
     var wasDbCleared: Boolean
         get() = prefs.getBoolean(WAS_DB_CLEARED, false)
         set(wasDbCleared) = prefs.edit().putBoolean(WAS_DB_CLEARED, wasDbCleared).apply()
-
-    var keyboardHeight: Int
-        get() = prefs.getInt(SOFT_KEYBOARD_HEIGHT, context.getDefaultKeyboardHeight())
-        set(keyboardHeight) = prefs.edit().putInt(SOFT_KEYBOARD_HEIGHT, keyboardHeight).apply()
 
     var useRecycleBin: Boolean
         get() = prefs.getBoolean(USE_RECYCLE_BIN, false)

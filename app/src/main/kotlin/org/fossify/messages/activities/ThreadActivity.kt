@@ -8,6 +8,8 @@ import android.content.Intent
 import android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
 import android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
 import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.drawable.RippleDrawable
 import android.graphics.drawable.LayerDrawable
 import android.net.Uri
 import android.os.Bundle
@@ -39,12 +41,11 @@ import android.widget.RelativeLayout
 import android.widget.Toast
 import androidx.annotation.StringRes
 import androidx.appcompat.content.res.AppCompatResources
-import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.res.ResourcesCompat
+import androidx.core.graphics.ColorUtils
 import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.updateLayoutParams
 import androidx.documentfile.provider.DocumentFile
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -55,13 +56,13 @@ import org.fossify.commons.dialogs.PermissionRequiredDialog
 import org.fossify.commons.dialogs.RadioGroupDialog
 import org.fossify.commons.extensions.addBlockedNumber
 import org.fossify.commons.extensions.applyColorFilter
+import org.fossify.commons.extensions.adjustForContrast
 import org.fossify.commons.extensions.beGone
 import org.fossify.commons.extensions.beVisible
 import org.fossify.commons.extensions.beVisibleIf
 import org.fossify.commons.extensions.copyToClipboard
 import org.fossify.commons.extensions.darkenColor
 import org.fossify.commons.extensions.formatDate
-import org.fossify.commons.extensions.getBottomNavigationBackgroundColor
 import org.fossify.commons.extensions.getContrastColor
 import org.fossify.commons.extensions.getFilenameFromPath
 import org.fossify.commons.extensions.getFilenameFromUri
@@ -73,7 +74,6 @@ import org.fossify.commons.extensions.getProperTextColor
 import org.fossify.commons.extensions.getTextSize
 import org.fossify.commons.extensions.hideKeyboard
 import org.fossify.commons.extensions.insetsController
-import org.fossify.commons.extensions.isDynamicTheme
 import org.fossify.commons.extensions.isVisible
 import org.fossify.commons.extensions.launchActivityIntent
 import org.fossify.commons.extensions.maybeShowNumberPickerDialog
@@ -125,7 +125,6 @@ import org.fossify.messages.extensions.dialNumber
 import org.fossify.messages.extensions.emptyMessagesRecycleBinForConversation
 import org.fossify.messages.extensions.filterNotInByKey
 import org.fossify.messages.extensions.getAddresses
-import org.fossify.messages.extensions.getDefaultKeyboardHeight
 import org.fossify.messages.extensions.getFileSizeFromUri
 import org.fossify.messages.extensions.getMessages
 import org.fossify.messages.extensions.getSmsDraft
@@ -308,6 +307,7 @@ class ThreadActivity : SimpleActivity() {
         }
 
         val bottomBarColor = getBottomBarColor()
+        binding.threadHolder.setBackgroundColor(bottomBarColor)
         binding.messageHolder.root.setBackgroundColor(bottomBarColor)
         binding.shortCodeHolder.root.setBackgroundColor(bottomBarColor)
     }
@@ -464,7 +464,6 @@ class ThreadActivity : SimpleActivity() {
 
                 setupThreadTitle()
                 setupSIMSelector()
-                updateMessageType()
                 callback()
             }
         }
@@ -859,10 +858,10 @@ class ThreadActivity : SimpleActivity() {
         val textColor = getProperTextColor()
 
         binding.messageHolder.apply {
-            threadSendMessage.setTextColor(textColor)
-            threadSendMessage.compoundDrawables.forEach {
-                it?.applyColorFilter(textColor)
-            }
+            threadComposerBackground.backgroundTintList = ColorStateList.valueOf(getProperBackgroundColor())
+            val sendColor = getProperPrimaryColor()
+            threadSendMessage.backgroundTintList = ColorStateList.valueOf(sendColor)
+            threadSendMessage.imageTintList = ColorStateList.valueOf(sendColor.getContrastColor())
 
             confirmManageContacts.applyColorFilter(textColor)
             threadAddAttachment.applyColorFilter(textColor)
@@ -1074,63 +1073,56 @@ class ThreadActivity : SimpleActivity() {
 
     @SuppressLint("MissingPermission")
     private fun setupSIMSelector() {
-        val availableSIMs = subscriptionManagerCompat().activeSubscriptionInfoList ?: return
-        if (availableSIMs.size > 1) {
-            availableSIMs.forEachIndexed { index, subscriptionInfo ->
-                var label = subscriptionInfo.displayName?.toString() ?: ""
-                if (subscriptionInfo.number?.isNotEmpty() == true) {
-                    label += " (${subscriptionInfo.number})"
-                }
-                val simCard = SIMCard(index + 1, subscriptionInfo.subscriptionId, label)
-                availableSIMCards.add(simCard)
+        val availableSIMs = subscriptionManagerCompat().activeSubscriptionInfoList.orEmpty()
+        availableSIMCards.clear()
+        binding.messageHolder.threadSelectSim.beGone()
+        availableSIMCards.addAll(getSIMCards(availableSIMs))
+
+        val numbers = participants.flatMap { contact -> contact.phoneNumbers.map { it.normalizedNumber } }
+        if (availableSIMs.isEmpty() || numbers.isEmpty()) return
+
+        currentSIMCardIndex = getProperSimIndex(availableSIMs, numbers)
+        if (availableSIMs.size < 2) return
+
+        binding.messageHolder.threadSelectSim.apply {
+            fun showSelectedSim() {
+                val sim = availableSIMCards[currentSIMCardIndex]
+                text = sim.id.toString()
+                contentDescription = getString(R.string.select_message_sim, sim.label)
+                val color = sim.color.adjustForContrast(getProperBackgroundColor())
+                (background.mutate() as RippleDrawable).findDrawableByLayerId(R.id.composer_sim_badge).setTint(color)
+                setTextColor(color.getContrastColor())
             }
 
-            val numbers = ArrayList<String>()
-            participants.forEach { contact ->
-                contact.phoneNumbers.forEach {
-                    numbers.add(it.normalizedNumber)
-                }
+            showSelectedSim()
+            beVisible()
+            setOnClickListener {
+                currentSIMCardIndex = (currentSIMCardIndex + 1) % availableSIMCards.size
+                val sim = availableSIMCards[currentSIMCardIndex]
+                numbers.forEach { config.saveUseSIMIdAtNumber(it, sim.subscriptionId) }
+                showSelectedSim()
+                toast(sim.label)
             }
+        }
+    }
 
-            if (numbers.isEmpty()) {
-                return
+    private fun getSIMCards(subscriptions: List<SubscriptionInfo>): List<SIMCard> {
+        val colors = subscriptions.map { it.iconTint }
+        val useFallbackColors = colors.distinct().size != colors.size || colors.any { Color.alpha(it) != 255 }
+        return subscriptions.mapIndexed { index, subscription ->
+            val label = subscription.displayName?.toString()?.takeIf { it.isNotBlank() } ?: getString(R.string.message_sim_name, index + 1)
+            val color = if (useFallbackColors) {
+                Color.HSVToColor(floatArrayOf((216f + index * 110f) % 360f, 0.76f, 0.69f))
+            } else {
+                subscription.iconTint
             }
-
-            currentSIMCardIndex = getProperSimIndex(availableSIMs, numbers)
-            binding.messageHolder.threadSelectSimIcon.applyColorFilter(getProperTextColor())
-            binding.messageHolder.threadSelectSimIcon.beVisible()
-            binding.messageHolder.threadSelectSimNumber.beVisible()
-
-            if (availableSIMCards.isNotEmpty()) {
-                binding.messageHolder.threadSelectSimIcon.setOnClickListener {
-                    currentSIMCardIndex = (currentSIMCardIndex + 1) % availableSIMCards.size
-                    val currentSIMCard = availableSIMCards[currentSIMCardIndex]
-                    @SuppressLint("SetTextI18n")
-                    binding.messageHolder.threadSelectSimNumber.text = currentSIMCard.id.toString()
-                    val currentSubscriptionId = currentSIMCard.subscriptionId
-                    numbers.forEach {
-                        config.saveUseSIMIdAtNumber(it, currentSubscriptionId)
-                    }
-                    toast(currentSIMCard.label)
-                }
-            }
-
-            binding.messageHolder.threadSelectSimNumber.setTextColor(
-                getProperTextColor().getContrastColor()
-            )
-            try {
-                @SuppressLint("SetTextI18n")
-                binding.messageHolder.threadSelectSimNumber.text =
-                    (availableSIMCards[currentSIMCardIndex].id).toString()
-            } catch (e: Exception) {
-                showErrorToast(e)
-            }
+            SIMCard(index + 1, subscription.subscriptionId, label, color)
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun getProperSimIndex(
-        availableSIMs: MutableList<SubscriptionInfo>,
+        availableSIMs: List<SubscriptionInfo>,
         numbers: List<String>,
     ): Int {
         val userPreferredSimId = config.getUseSIMIdAtNumber(numbers.first())
@@ -1284,7 +1276,6 @@ class ThreadActivity : SimpleActivity() {
 
         participants.add(contact)
         showSelectedContacts()
-        updateMessageType()
     }
 
     private fun markAsUnread() {
@@ -1339,11 +1330,8 @@ class ThreadActivity : SimpleActivity() {
         val messageSnapshot = messages.toSortedMessages()
         val items = ArrayList<ThreadItem>()
 
-        val subscriptionIdToSimId = HashMap<Int, String>()
-        subscriptionIdToSimId[-1] = "?"
-        subscriptionManagerCompat().activeSubscriptionInfoList?.forEachIndexed { index, subscriptionInfo ->
-            subscriptionIdToSimId[subscriptionInfo.subscriptionId] = "${index + 1}"
-        }
+        val subscriptions = subscriptionManagerCompat().activeSubscriptionInfoList.orEmpty()
+        val simCards = if (subscriptions.size > 1) getSIMCards(subscriptions).associateBy { it.subscriptionId } else emptyMap()
 
         var prevDateTime = 0
         var prevSIMId = -2
@@ -1354,8 +1342,7 @@ class ThreadActivity : SimpleActivity() {
             // do not show the date/time above every message, only if the difference between the 2 messages is at least MIN_DATE_TIME_DIFF_SECS,
             // or if the message is sent from a different SIM
             if (shouldShowThreadDateTime(message, prevDateTime, prevSIMId)) {
-                val simCardID = subscriptionIdToSimId[message.subscriptionId] ?: "?"
-                items.add(ThreadDateTime(message.date, simCardID))
+                items.add(ThreadDateTime(message.date, message.subscriptionId, simCards[message.subscriptionId]))
                 prevDateTime = message.date
             }
             items.add(message)
@@ -1578,8 +1565,6 @@ class ThreadActivity : SimpleActivity() {
                 threadSendMessage.alpha = 0.4f
             }
         }
-
-        updateMessageType()
     }
 
     private fun sendMessage() {
@@ -1786,7 +1771,6 @@ class ThreadActivity : SimpleActivity() {
         participants =
             participants.filter { it.rawId != id }.toMutableList() as ArrayList<SimpleContact>
         showSelectedContacts()
-        updateMessageType()
     }
 
     private fun getPhoneNumbersFromIntent(): ArrayList<String> {
@@ -1910,16 +1894,6 @@ class ThreadActivity : SimpleActivity() {
         return getAttachmentSelections().isNotEmpty() || isGroupMms || isLongMmsMessage
     }
 
-    private fun updateMessageType() {
-        val text = binding.messageHolder.threadTypeMessage.text.toString()
-        val stringId = if (isMmsMessage(text)) {
-            R.string.mms
-        } else {
-            R.string.sms
-        }
-        binding.messageHolder.threadSendMessage.setText(stringId)
-    }
-
     private fun showScheduledMessageInfo(message: Message) {
         val items = arrayListOf(
             RadioItem(TYPE_EDIT, getString(R.string.update_message)),
@@ -2036,12 +2010,7 @@ class ThreadActivity : SimpleActivity() {
         } else {
             R.drawable.ic_send_vector
         }
-        ResourcesCompat.getDrawable(resources, drawableResId, theme)?.apply {
-            applyColorFilter(getProperTextColor())
-            binding.messageHolder.threadSendMessage.setCompoundDrawablesWithIntrinsicBounds(
-                null, this, null, null
-            )
-        }
+        binding.messageHolder.threadSendMessage.setImageResource(drawableResId)
     }
 
     private fun buildScheduledMessage(text: String, subscriptionId: Int, messageId: Long): Message {
@@ -2073,8 +2042,6 @@ class ThreadActivity : SimpleActivity() {
         val buttonColors = arrayOf(
             org.fossify.commons.R.color.md_red_500,
             org.fossify.commons.R.color.md_brown_500,
-            org.fossify.commons.R.color.md_pink_500,
-            org.fossify.commons.R.color.md_purple_500,
             org.fossify.commons.R.color.md_teal_500,
             org.fossify.commons.R.color.md_green_500,
             org.fossify.commons.R.color.md_indigo_500,
@@ -2083,8 +2050,6 @@ class ThreadActivity : SimpleActivity() {
         arrayOf(
             choosePhotoIcon,
             chooseVideoIcon,
-            takePhotoIcon,
-            recordVideoIcon,
             recordAudioIcon,
             pickFileIcon,
             pickContactIcon,
@@ -2099,8 +2064,6 @@ class ThreadActivity : SimpleActivity() {
         arrayOf(
             choosePhotoText,
             chooseVideoText,
-            takePhotoText,
-            recordVideoText,
             recordAudioText,
             pickFileText,
             pickContactText,
@@ -2108,19 +2071,19 @@ class ThreadActivity : SimpleActivity() {
         ).forEach { it.setTextColor(textColor) }
 
         choosePhoto.setOnClickListener {
-            launchGetContentIntent(arrayOf("image/*"), PICK_PHOTO_INTENT)
+            showAttachmentSources(R.string.attachment_photo, org.fossify.commons.R.string.choose_photo, org.fossify.commons.R.string.take_photo) { capture ->
+                if (capture) launchCapturePhotoIntent() else launchGetContentIntent(arrayOf("image/*"), PICK_PHOTO_INTENT)
+            }
         }
         chooseVideo.setOnClickListener {
-            launchGetContentIntent(arrayOf("video/*"), PICK_VIDEO_INTENT)
-        }
-        takePhoto.setOnClickListener {
-            launchCapturePhotoIntent()
-        }
-        recordVideo.setOnClickListener {
-            launchCaptureVideoIntent()
+            showAttachmentSources(R.string.attachment_video, org.fossify.commons.R.string.choose_video, org.fossify.commons.R.string.record_video) { capture ->
+                if (capture) launchCaptureVideoIntent() else launchGetContentIntent(arrayOf("video/*"), PICK_VIDEO_INTENT)
+            }
         }
         recordAudio.setOnClickListener {
-            launchCaptureAudioIntent()
+            showAttachmentSources(R.string.attachment_audio, R.string.attachment_choose_audio, org.fossify.commons.R.string.record_audio) { capture ->
+                if (capture) launchCaptureAudioIntent() else launchGetContentIntent(arrayOf("audio/*"), PICK_DOCUMENT_INTENT)
+            }
         }
         pickFile.setOnClickListener {
             launchGetContentIntent(arrayOf("*/*"), PICK_DOCUMENT_INTENT)
@@ -2134,6 +2097,13 @@ class ThreadActivity : SimpleActivity() {
             } else {
                 launchScheduleSendDialog()
             }
+        }
+    }
+
+    private fun showAttachmentSources(title: Int, choose: Int, capture: Int, onSelected: (Boolean) -> Unit) {
+        val choices = arrayListOf(RadioItem(0, getString(choose)), RadioItem(1, getString(capture)))
+        RadioGroupDialog(activity = this, items = choices, titleId = title) { choice ->
+            onSelected(choice == 1)
         }
     }
 
@@ -2151,12 +2121,7 @@ class ThreadActivity : SimpleActivity() {
 
     private fun hideAttachmentPicker() {
         binding.messageHolder.attachmentPickerDivider.beGone()
-        binding.messageHolder.attachmentPickerHolder.apply {
-            beGone()
-            updateLayoutParams<ConstraintLayout.LayoutParams> {
-                height = config.keyboardHeight
-            }
-        }
+        binding.messageHolder.attachmentPickerHolder.beGone()
         animateAttachmentButton(rotation = 0f)
     }
 
@@ -2168,28 +2133,13 @@ class ThreadActivity : SimpleActivity() {
             .start()
     }
 
-    private fun getBottomBarColor() = if (isDynamicTheme()) {
-        resources.getColor(org.fossify.commons.R.color.you_bottom_bar_color)
-    } else {
-        getBottomNavigationBackgroundColor()
-    }
+    private fun getBottomBarColor() = ColorUtils.blendARGB(getProperBackgroundColor(), Color.BLACK, 0.05f)
 
     fun setupMessagingEdgeToEdge() {
         ViewCompat.setOnApplyWindowInsetsListener(
             binding.messageHolder.threadTypeMessage
-        ) { view, insets ->
-            val type = WindowInsetsCompat.Type.ime()
-            val isKeyboardVisible = insets.isVisible(type)
-            if (isKeyboardVisible) {
-                val keyboardHeight = insets.getInsets(type).bottom
-                val bottomBarHeight = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom
-
-                // check keyboard height just to be sure, 150 seems like a good middle ground between ime and navigation bar
-                config.keyboardHeight = if (keyboardHeight > 150) {
-                    keyboardHeight - bottomBarHeight
-                } else {
-                    getDefaultKeyboardHeight()
-                }
+        ) { _, insets ->
+            if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
                 hideAttachmentPicker()
             } else if (isAttachmentPickerVisible) {
                 showAttachmentPicker()

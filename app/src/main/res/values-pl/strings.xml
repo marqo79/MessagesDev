@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="send_text_message">Wyślij wiadomość</string>
+    <string name="message_composer_hint">Wiadomość</string>
+    <string name="attachment_photo">Zdjęcie</string>
+    <string name="attachment_video">Wideo</string>
+    <string name="attachment_audio">Dźwięk</string>
+    <string name="attachment_file">Plik</string>
+    <string name="attachment_contact">Kontakt</string>
+    <string name="attachment_schedule">Zaplanuj</string>
+    <string name="attachment_choose_audio">Wybierz plik audio</string>
+    <string name="select_message_sim">Wysyłanie z %1$s. Dotknij, aby zmienić kartę SIM</string>
     <string name="type_a_message">Napisz wiadomość…</string>
     <string name="message_not_sent_short">Wiadomość nie została wysłana</string>
     <string name="message_not_sent_touch_retry">Nie wysłano. Naciśnij, aby spróbować ponownie.</string>

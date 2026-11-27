@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?attr/colorControlHighlight">
+    <item
+        android:id="@+id/composer_sim_badge"
+        android:bottom="12dp"
+        android:drawable="@drawable/ic_sim_vector"
+        android:left="10dp"
+        android:right="10dp"
+        android:top="12dp" />
+</ripple>

@@ -1358,10 +1358,6 @@ fun Context.rescheduleAllScheduledMessages() {
     }
 }
 
-fun Context.getDefaultKeyboardHeight(): Int {
-    return resources.getDimensionPixelSize(R.dimen.default_keyboard_height)
-}
-
 fun Context.shouldUnarchive(): Boolean {
     return config.isArchiveAvailable && !config.keepConversationsArchived
 }

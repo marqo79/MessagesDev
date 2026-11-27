@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="send_text_message">Send message</string>
+    <string name="message_composer_hint">Message…</string>
+    <string name="message_sim_name" translatable="false">SIM %1$d</string>
+    <string name="attachment_photo">Photo</string>
+    <string name="attachment_video">Video</string>
+    <string name="attachment_audio">Audio</string>
+    <string name="attachment_file">File</string>
+    <string name="attachment_contact">Contact</string>
+    <string name="attachment_schedule">Schedule</string>
+    <string name="attachment_choose_audio">Choose audio file</string>
+    <string name="select_message_sim">Sending with %1$s. Tap to switch SIM</string>
     <string name="app_launcher_name">Messages</string>
     <string name="type_a_message">Type a message…</string>
     <string name="message_not_sent_short">Message not sent</string>
